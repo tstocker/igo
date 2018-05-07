@@ -1,0 +1,547 @@
+<html>
+
+<body>
+	<div id="BlockBoard" style="width:600px; height:600px; box-shadow: 8px 8px 12px #000; font-family: verdana"></div>
+	<div id="test"></div>
+</body>
+
+<script>
+
+	/***
+	 *  Class Game
+	 ***/
+	function Game(id, size) {
+		this.id = id;
+		this.gridSize = size;
+		this.history  = [];
+		this.board    = this.initBoard();
+		this.turn     = 0;
+		this.players  = ['black', 'white'];
+
+	    // board definition
+		this.viewBoard = new CanvasBoard(id, size);
+	    this.viewBoard.draw();
+
+	    this.showTurn();
+	    this.refreshTurn();
+	    // playView definition
+		this.playView = new CanvasPlayView(this.viewBoard);
+		//playView.node.addEventListener("mousemove", ShowPlayPosition.bind(playView), false);
+		this.playView.node.addEventListener("click", this.eventStone.bind(this), false);
+		this.showScore();
+	}
+
+	/**
+	 * Function eventStone
+	 * OnClick set stone on the board if possible
+	 * @param e event
+	 **/
+    Game.prototype.eventStone = function eventStone(e) {
+		let X = e.pageX - this.playView.node.offsetLeft;
+		let Y = e.pageY - this.playView.node.offsetTop;
+		let x = Math.floor((X - (this.playView.grid.start - this.playView.grid.caseSize / 2)) / this.playView.grid.caseSize);
+		let y = Math.floor((Y - (this.playView.grid.start - this.playView.grid.caseSize / 2)) / this.playView.grid.caseSize);
+
+		let idPlayer = this.turn % 2;
+
+		// test if stone is in grid size
+		if(x < this.playView.grid.size && y < this.playView.grid.size && x >= 0 && y >= 0)
+		{
+			// are already a stone in this case ?
+			if(this.board[x][y] === 0)
+			{
+				// remove stone after action
+				let removableStone = this.findRemovableStone(idPlayer + 1, {'x':x, 'y':y});
+				
+				// block first remove when illimited stone capture is possible
+				let historyLength = this.history.length;
+
+				let isAlreadyRemove = false;
+				if(historyLength > 0) 
+				{
+					if(this.history[historyLength - 1].action === "remove"
+						&& this.history[historyLength - 1].value.length === 1
+						&& PositionInArray(this.history[historyLength - 1].value, {'x':x, 'y':y}))
+						isAlreadyRemove = true;
+				}
+
+				if(!isAlreadyRemove)
+				{
+					this.removeBoardStone(removableStone);
+
+					if(this.getGroupStone(idPlayer + 1, {'x':x, 'y':y}).liberty.length !== 0)
+					{
+						this.board[x][y] = idPlayer + 1;
+						this.addAction(idPlayer, 'stone', {'x':x, 'y':y});
+						this.playView.drawStone(this.players[idPlayer], x, y);
+					}
+
+					if(removableStone.length > 0)
+					{
+						this.addAction(idPlayer, 'remove', removableStone);
+						this.playView.removeStone(removableStone);
+					}
+					this.refreshTurn();
+					this.showScore();
+				}
+			} 
+			// TODO impossible move
+		}
+	};
+
+	/**
+	 * Function addAction
+	 * store user action in history
+	 * @param idPlayer int
+	 * @param action string (stone||remove)
+	 * @return boolean
+	 **/
+    Game.prototype.addAction = function addAction(idPlayer, action)
+	{
+		if(undefined === arguments[2])
+			return false; 
+
+		let historyLength = this.history.length;
+		let history = {'player': this.players[idPlayer], 'action': action, 'value': arguments[2]}
+
+		if(historyLength === 0)
+		{
+			let score = [];
+			let playersLength = this.players.length;
+			for(let idx = 0; idx < playersLength; idx++)
+				score.push(0);
+
+			history.score = score;
+		} else {
+			history.score = this.history[historyLength - 1].score;
+		}
+
+		// action : {handicap, stone, pass, remove}
+		switch (action)
+		{
+			case 'stone' : 
+				if(typeof(arguments[2]) === 'object')
+				{
+					arguments[2].x = arguments[2].x || -1; // undefined position
+					arguments[2].y = arguments[2].y || -1; // undefined position
+				}
+				this.history.push(history);
+				this.turn++;
+				oWidget.log(history.player + ' [' + history.value.x + ', ' + history.value.y + ']');
+				break;
+			case 'remove' :
+				history.score[idPlayer] += arguments[2].length;
+				this.history.push(history);
+				// TODO upgrade player score
+				break;
+		}
+
+		return true;
+	};
+
+    /**
+	 * Function initBoard
+	 * Initialise empty grid
+	 **/
+    Game.prototype.initBoard = function initBoard()
+	{
+		let board = [];
+		for (let x = 0; x < this.gridSize; x++)
+		{
+			board[x] = [];
+			for (let y = 0; y < this.gridSize; y++)
+			{
+				board[x][y] = 0;
+			}
+		}
+
+		return board;
+	};
+
+	/**
+	 * Function PositionInArray
+	 *  Return if stone exist on position given
+	 * @param array array
+	 * @param val position
+	 * @return boolean
+	 **/
+	function PositionInArray(array, val)
+	{
+	    let l = array.length;
+	    for(let i = 0; i < l; i++) {
+	        if((val.x === array[i].x) && (val.y === array[i].y))
+	        	return true;
+	    }
+
+	    return false;
+	}
+
+    Game.prototype.getStone = function getStone(position) {return this.board[position.x][position.y]};
+    Game.prototype.getGroupStone = function getGroupStone(player, position, groupStone)
+	{
+		groupStone = groupStone || {'stone': [], 'liberty': []};
+
+		let match = [];
+		match.push({'x':1, 'y':0}); 
+		match.push({'x':-1, 'y':0}); 
+		match.push({'x':0, 'y':1}); 
+		match.push({'x':0, 'y':-1}); 
+
+		groupStone.stone.push(position);
+
+		for(let id in match)
+		{
+			let nextStonePos = {'x': position.x + match[id].x, 'y': position.y + match[id].y};
+			
+			if(!(nextStonePos.x >= this.gridSize || nextStonePos.x < 0 
+				|| nextStonePos.y >= this.gridSize || nextStonePos.x < 0 )) {
+
+
+				if(this.getStone(nextStonePos) === player)
+				{
+					if(!PositionInArray(groupStone.stone, nextStonePos))
+						groupStone = this.getGroupStone(player, nextStonePos, groupStone);
+				} else if(this.getStone(nextStonePos) === 0
+						&& !PositionInArray(groupStone.liberty, nextStonePos)
+						&& !PositionInArray(groupStone.stone, nextStonePos)) {
+						groupStone.liberty.push(nextStonePos);
+				}
+			}
+		}
+		
+		return groupStone;
+	};
+
+    /**
+	 * Function findRemovableStone
+	 * Find removable stone
+	 * @param player
+	 * @param position position
+	 **/
+    Game.prototype.findRemovableStone = function findRemovableStone(player, position)
+	{
+		let stoneToRemove = [];
+		let match = [];
+		match.push({'x':1, 'y':0}); 
+		match.push({'x':-1, 'y':0}); 
+		match.push({'x':0, 'y':1}); 
+		match.push({'x':0, 'y':-1}); 
+
+		for(let id in match)
+		{
+			let nextStonePos = {'x': position.x + match[id].x, 'y': position.y + match[id].y};
+
+			if(!(nextStonePos.x >= this.gridSize || nextStonePos.x < 0 
+				|| nextStonePos.y >= this.gridSize || nextStonePos.x < 0 )) {
+
+				let nextPlayer = this.getStone(nextStonePos);
+
+				if( nextPlayer !== player && this.getStone(nextStonePos) > 0 && !PositionInArray(stoneToRemove, nextStonePos))
+				{
+					let groupStone = this.getGroupStone(nextPlayer, nextStonePos);
+					if(groupStone.liberty.length === 1)
+						stoneToRemove = stoneToRemove.concat(groupStone.stone);
+				}
+			}
+		}
+
+		return stoneToRemove;
+	};
+
+	/**
+	 * Function removeBoardStone
+	 **/
+    Game.prototype.removeBoardStone = function removeBoardStone(aStones)
+	{
+		for(let id in aStones)
+		{
+			this.board[aStones[id].x][aStones[id].y] = 0;
+		}
+
+		return true;
+	};
+
+    /**
+	 * Function showTurn
+	 * add element in html to display turns
+	 **/
+    Game.prototype.showTurn = function showTurn()
+	{
+		let nodeInfoTurn = document.createElement('div');
+		nodeInfoTurn.setAttribute('id', this.id + '_infoTurn');
+		nodeInfoTurn.style.fontSize  = (this.viewBoard.width / 250 * 10) + 'px'; // autosize
+		nodeInfoTurn.style.width = this.viewBoard.width;
+		nodeInfoTurn.style.textAlign = 'center';
+		nodeInfoTurn.style.fontWeight = 'bold';
+		nodeInfoTurn.style.margin = 'auto';
+		nodeInfoTurn.style.position = 'absolute';
+		nodeInfoTurn.style.zIndex = 10;
+		document.getElementById(this.id).appendChild(nodeInfoTurn);
+	};
+
+    /**
+	 * Function refreshTurn
+	 * Refresh display of turn number
+	 **/
+    Game.prototype.refreshTurn = function refreshTurn()
+	{
+		if(document.getElementById(this.id+'_infoTurn')) 
+			document.getElementById(this.id+'_infoTurn').innerHTML = 'Turn: ' + (this.turn + 1) + ' ('+ this.players[Math.floor(this.turn % 2)] + ')';
+	};
+
+    /**
+	 * Function showScore
+	 * Display score of stone captured on page
+	 **/
+    Game.prototype.showScore = function showScore() {
+		if(0 !== this.history.length)
+		{
+			let html = '';
+	
+			for(let player in this.history[this.history.length - 1].score)
+			{
+				html += this.players[player]+': ' + this.history[this.history.length - 1].score[player];
+			}
+
+			document.getElementById('test').innerHTML = html;
+		} else {
+			document.getElementById('test').innerHTML = 'black: 0 white: 0';
+		}
+	};
+
+	/**
+	 * Class Player
+	 **/
+	function Player(id, color)
+	{
+		this.id = id;
+		this.color = color;
+	}
+
+	/**
+	 * Function ShowPlayPosition
+	 *
+	 **/
+	function ShowPlayPosition(e){
+		let X = e.pageX - this.node.offsetLeft;
+		let Y = e.pageY - this.node.offsetTop;
+		document.getElementById('test').innerHTML = X + 'x, ' + Y + 'y';
+	}
+
+	/**
+	 * Function grid
+	 * Define standart size for grid
+	 * @param size int
+	 **/
+	function grid(size)
+	{
+		size = size || 9;
+		if(size !== 9 && size !== 13 && size !== 19)
+			return false;
+		this.size = size;
+	}
+
+	/***
+	 * Class CanvasPlayView
+	 * canvas for stones display
+	 * @param oBoard CanvasBoard
+	 ***/
+	function CanvasPlayView(oBoard)
+	{
+		this.board = oBoard.node;
+		this.grid = oBoard.grid;
+
+		let playView = document.createElement('canvas');
+		playView.setAttribute('id', 'playView');
+		playView.setAttribute('width', this.board.width);
+		playView.setAttribute('height', this.board.width);
+		playView.style.zIndex = 5;
+		playView.style.position = 'absolute';
+
+		this.board.parentNode.appendChild(playView);
+		this.node = document.getElementById('playView');
+
+		this.context = this.node.getContext('2d'); // init canvas
+	}
+
+	/***
+	 * Function drawStone
+	 * 	Draw a stone on canvas
+	 * @param color string
+	 * @param x int
+	 * @param y int
+	 ***/
+	CanvasPlayView.prototype.drawStone = function drawStone(color, x, y) {
+	
+		let posX = this.grid.start + x * this.grid.caseSize;
+		let posY = this.grid.start + y * this.grid.caseSize;
+		let radius = this.grid.caseSize / 2 - 1;
+
+		this.context.beginPath();
+	    this.context.arc(posX, posY, radius, 0, 2 * Math.PI, false);
+	   
+	    this.context.lineWidth = 0.1;
+
+	    // comment/uncomment those lines for remove/set volumes on stone
+	    this.context.shadowColor = '#3C3C3C';
+		this.context.shadowOffsetX = 1;
+        this.context.shadowOffsetY = 1;
+        this.context.shadowBlur    = 1;
+
+		// create radial gradient
+		let grd = this.context.createRadialGradient(x,y,radius / 2,x,y,radius);
+		// light blue
+		grd.addColorStop(0, '#AAA');
+		// dark blue
+		grd.addColorStop(1, color);
+
+		this.context.fillStyle = grd;
+		this.context.fill();
+
+	    this.context.strokeStyle = '#003300';
+	    this.context.stroke();
+	};
+
+	/**
+	 * Function removeStone
+	 * Delete stone from canvas
+	 * @param aStones array
+	 **/
+	CanvasPlayView.prototype.removeStone = function removeStone(aStones) {
+		for (let id in aStones)
+		{
+			let x = this.grid.start + aStones[id].x * this.grid.caseSize - this.grid.caseSize / 2;
+			let y = this.grid.start + aStones[id].y * this.grid.caseSize - this.grid.caseSize / 2;
+			this.context.clearRect(x, y, this.grid.caseSize, this.grid.caseSize);
+		}
+	};
+
+	/**
+	 * Class CanvasBoard
+	 *  Canvas where board is draw
+	 * @param id string
+	 * @param size integer
+	 **/
+	function CanvasBoard(id, size)
+	{
+		let parent = document.getElementById(id);
+		this.width = parent.style.width.replace('px', '');
+		let board  = document.createElement('canvas');
+		board.setAttribute('id', 'board');
+		board.setAttribute('width', this.width);
+		board.setAttribute('height', this.width);
+		board.style.border = 'solid 1px black';
+		board.style.position = 'absolute';
+
+		parent.appendChild(board);
+		this.node = document.getElementById('board');
+		
+		this.context = this.node.getContext('2d');
+
+		// Grid definition
+		this.grid = new grid(size);
+		this.grid.caseSize = Math.floor(this.width / (this.grid.size + 1));
+		this.grid.start =  Math.floor((this.width - (this.grid.caseSize * (this.grid.size - 1))) / 2);
+	}
+
+
+	/**
+	* Draw grid on board
+	*
+	*/
+	CanvasBoard.prototype.draw = function draw()
+	{
+
+		this.context.rect(0, 0, this.node.width, this.node.height);
+		this.context.stroke();
+		// create radial gradient
+		let grd = this.context.createRadialGradient(238, 50, 10, 238, 50, 800);
+		// light blue
+		grd.addColorStop(0, '#FFFFAA');
+		// dark blue
+		grd.addColorStop(1, '#FF9933');
+
+		this.context.fillStyle = grd;
+		this.context.fill();
+		this.context.fillStyle="#FFFFFF";
+
+		let index = 0;
+		while(index < this.grid.caseSize * (this.grid.size)) {
+			this.context.beginPath();
+			this.context.lineWidth = 0.25;
+			this.context.moveTo(this.grid.start, this.grid.start + index);
+			this.context.lineTo(this.grid.start + this.grid.caseSize * (this.grid.size - 1), this.grid.start + index);
+			this.context.stroke();
+			this.context.beginPath();
+			this.context.lineWidth = 0.25;
+			this.context.moveTo(this.grid.start + index, this.grid.start);
+			this.context.lineTo(this.grid.start + index, this.grid.start + this.grid.caseSize * (this.grid.size - 1));
+			this.context.stroke();
+			index = index + this.grid.caseSize;
+		}
+	};
+
+   function widget(name){
+   		this.name = name;
+   		this.node = document.createElement('div');
+   		
+   		this.node.style.position = "fixed";
+   		this.node.style.top = "10px";
+   		this.node.style.right = "20px";
+   		document.body.appendChild(this.node);
+   }
+
+   widget.prototype.renderConsole = function renderConsole()
+   {
+       let div = document.createElement('div');
+       div.id ="console";
+       div.style.width    = "200px";
+	   div.style.height   = "250px";
+	   div.style.color    = "#E3E3E3";
+	   div.style.padding  = "6px";
+	   div.style.fontSize = "13px";
+	   div.style.overflow = "hidden";
+	   div.style.border   = "1px solid #969696";
+	   div.style.backgroundColor = "#232323";
+	   this.node.appendChild(div);
+   };
+
+	widget.prototype.log = function log(str)
+ 	{
+ 		let log = document.createElement('div');
+ 		log.innerHTML = str;
+ 		document.getElementById('console').appendChild(log);
+ 		document.getElementById('console').scrollTop = document.getElementById('console').scrollHeight;
+ 	};
+
+ 	widget.prototype.renderControl = function renderControl(){
+ 		let div = document.createElement('div');
+	   	div.style.backgroundColor = "#232323";
+	   	
+	   	div.style.width    = "200px";
+	   	div.style.height   = "50px";
+	   	div.style.color    = "#E3E3E3";
+	   	div.style.padding  = "6px";
+	   	div.style.fontSize = "13px";
+	    div.style.overflow = "hidden";
+	    div.style.border   = "1px solid #969696";
+
+	    let left = document.createElement('span');
+	    left.addEventListener('click')
+	    left.innerHTML = '<-';
+
+	    let right = document.createElement('span');
+	    right.innerHTML = '->';
+
+	    div.appendChild(left);
+	    div.appendChild(right);
+
+	   	this.node.appendChild(div);
+ 	};
+
+    let oGame = new Game('BlockBoard', 19);
+    let oWidget = new widget('console');
+    oWidget.renderConsole();
+    oWidget.renderControl();
+</script>
+</html>

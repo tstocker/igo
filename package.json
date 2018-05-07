@@ -1,0 +1,14 @@
+{
+  "name": "igo",
+  "version": "1.0.0",
+  "description": "Igo game",
+  "main": "index.js",
+  "author": "Thibault Stocker <thibault.stocker@gmail.com>",
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.16.3"
+  },
+  "scripts": {
+    "start": "node index.js"
+  }
+}
